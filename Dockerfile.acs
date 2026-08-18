@@ -1,0 +1,79 @@
+FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG EDGS_COMMIT=f90b022445fc88368f75e66e8fb34aea88372cac
+ARG GAUSSIAN_SPLATTING_COMMIT=54c035f7834b564019656c3e3fcc3646292f727d
+ARG ROMA_COMMIT=370117431ffc5dc000fb46f6e581b74bdb2c3ff8
+ARG DIFF_RASTER_COMMIT=9c5c2028f6fbee2be239bc4c9421ff894fe4fbe0
+ARG SIMPLE_KNN_COMMIT=86710c2d4b46680c02301765dd79e465819c8f19
+
+ENV CUDA_HOME=/usr/local/cuda-12.1 \
+    PATH=/usr/local/cuda-12.1/bin:${PATH} \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:${LD_LIBRARY_PATH} \
+    TORCH_CUDA_ARCH_LIST=8.6 \
+    MAX_JOBS=4 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    EDGS_COMMIT=${EDGS_COMMIT}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates cmake curl ffmpeg git ninja-build \
+      libglib2.0-0 libgl1 libgomp1 python3.10 python3.10-dev python3-pip \
+      python-is-python3 unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip==24.2 setuptools==72.1.0 wheel==0.44.0 ninja==1.11.1.1 \
+    && python -m pip install --index-url https://download.pytorch.org/whl/cu121 \
+      torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1
+
+WORKDIR /opt/src
+
+# Pull immutable source archives instead of floating branches. This also avoids
+# SSH-only submodule URLs in the upstream install script.
+RUN curl -fL --retry 5 -o edgs.zip \
+      "https://github.com/CompVis/EDGS/archive/${EDGS_COMMIT}.zip" \
+    && unzip -q edgs.zip \
+    && mv "EDGS-${EDGS_COMMIT}" /opt/edgs \
+    && curl -fL --retry 5 -o gaussian-splatting.zip \
+      "https://github.com/graphdeco-inria/gaussian-splatting/archive/${GAUSSIAN_SPLATTING_COMMIT}.zip" \
+    && unzip -q gaussian-splatting.zip \
+    && cp -a "gaussian-splatting-${GAUSSIAN_SPLATTING_COMMIT}/." /opt/edgs/submodules/gaussian-splatting/ \
+    && curl -fL --retry 5 -o roma.zip \
+      "https://github.com/Parskatt/RoMa/archive/${ROMA_COMMIT}.zip" \
+    && unzip -q roma.zip \
+    && cp -a "RoMa-${ROMA_COMMIT}/." /opt/edgs/submodules/RoMa/ \
+    && curl -fL --retry 5 -o diff-raster.zip \
+      "https://github.com/graphdeco-inria/diff-gaussian-rasterization/archive/${DIFF_RASTER_COMMIT}.zip" \
+    && unzip -q diff-raster.zip \
+    && cp -a "diff-gaussian-rasterization-${DIFF_RASTER_COMMIT}/." \
+      /opt/edgs/submodules/gaussian-splatting/submodules/diff-gaussian-rasterization/ \
+    && curl -fL --retry 5 -o simple-knn.zip \
+      "https://gitlab.inria.fr/bkerbl/simple-knn/-/archive/${SIMPLE_KNN_COMMIT}/simple-knn-${SIMPLE_KNN_COMMIT}.zip" \
+    && unzip -q simple-knn.zip \
+    && cp -a "simple-knn-${SIMPLE_KNN_COMMIT}/." \
+      /opt/edgs/submodules/gaussian-splatting/submodules/simple-knn/ \
+    && rm -rf /opt/src/*
+
+COPY requirements.acs.txt /opt/edgs/requirements.acs.txt
+
+RUN python -m pip install -r /opt/edgs/requirements.acs.txt \
+    && python -m pip install --no-deps -e /opt/edgs/submodules/RoMa \
+    && python -m pip install --no-deps -e /opt/edgs/submodules/gaussian-splatting/submodules/diff-gaussian-rasterization \
+    && python -m pip install --no-deps -e /opt/edgs/submodules/gaussian-splatting/submodules/simple-knn
+
+# EDGS otherwise downloads these large model weights during every cold-start.
+RUN mkdir -p /root/.cache/torch/hub/checkpoints \
+    && curl -fL --retry 5 -o /root/.cache/torch/hub/checkpoints/roma_indoor.pth \
+      https://github.com/Parskatt/storage/releases/download/roma/roma_indoor.pth \
+    && curl -fL --retry 5 -o /root/.cache/torch/hub/checkpoints/dinov2_vitl14_pretrain.pth \
+      https://dl.fbaipublicfiles.com/dinov2/dinov2_vitl14/dinov2_vitl14_pretrain.pth \
+    && curl -fL --retry 5 -o /root/.cache/torch/hub/checkpoints/vgg16-397923af.pth \
+      https://download.pytorch.org/models/vgg16-397923af.pth
+
+COPY tools/edgs_gpu_smoke.py /opt/edgs/tools/edgs_gpu_smoke.py
+COPY tools/edgs_e2e_smoke.py /opt/edgs/tools/edgs_e2e_smoke.py
+
+WORKDIR /opt/edgs
+ENTRYPOINT ["python"]
+CMD ["tools/edgs_gpu_smoke.py"]

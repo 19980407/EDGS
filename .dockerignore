@@ -1,0 +1,7 @@
+.git
+.github
+notebooks
+outputs
+served_files
+__pycache__
+*.pyc
