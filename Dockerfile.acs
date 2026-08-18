@@ -5,6 +5,7 @@ ARG EDGS_COMMIT=f90b022445fc88368f75e66e8fb34aea88372cac
 ARG GAUSSIAN_SPLATTING_COMMIT=54c035f7834b564019656c3e3fcc3646292f727d
 ARG ROMA_COMMIT=370117431ffc5dc000fb46f6e581b74bdb2c3ff8
 ARG DIFF_RASTER_COMMIT=9c5c2028f6fbee2be239bc4c9421ff894fe4fbe0
+ARG GLM_COMMIT=5c46b9c07008ae65cb81ab79cd677ecc1934b903
 ARG SIMPLE_KNN_COMMIT=86710c2d4b46680c02301765dd79e465819c8f19
 
 ENV CUDA_HOME=/usr/local/cuda-12.1 \
@@ -48,6 +49,11 @@ RUN curl -fL --retry 5 -o edgs.zip \
     && unzip -q diff-raster.zip \
     && cp -a "diff-gaussian-rasterization-${DIFF_RASTER_COMMIT}/." \
       /opt/edgs/submodules/gaussian-splatting/submodules/diff-gaussian-rasterization/ \
+    && curl -fL --retry 5 -o glm.zip \
+      "https://github.com/g-truc/glm/archive/${GLM_COMMIT}.zip" \
+    && unzip -q glm.zip \
+    && cp -a "glm-${GLM_COMMIT}/." \
+      /opt/edgs/submodules/gaussian-splatting/submodules/diff-gaussian-rasterization/third_party/glm/ \
     && curl -fL --retry 5 -o simple-knn.zip \
       "https://gitlab.inria.fr/bkerbl/simple-knn/-/archive/${SIMPLE_KNN_COMMIT}/simple-knn-${SIMPLE_KNN_COMMIT}.zip" \
     && unzip -q simple-knn.zip \
