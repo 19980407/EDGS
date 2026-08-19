@@ -1,7 +1,10 @@
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+ARG CUDA_VERSION=12.1.1
+ARG EDGS_COMMIT=f90b022445fc88368f75e66e8fb34aea88372cac
+
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG EDGS_COMMIT=f90b022445fc88368f75e66e8fb34aea88372cac
+ARG EDGS_COMMIT
 ARG GAUSSIAN_SPLATTING_COMMIT=54c035f7834b564019656c3e3fcc3646292f727d
 ARG ROMA_COMMIT=370117431ffc5dc000fb46f6e581b74bdb2c3ff8
 ARG DIFF_RASTER_COMMIT=9c5c2028f6fbee2be239bc4c9421ff894fe4fbe0
@@ -80,6 +83,32 @@ RUN mkdir -p /root/.cache/torch/hub/checkpoints \
 COPY tools/edgs_gpu_smoke.py /opt/edgs/tools/edgs_gpu_smoke.py
 COPY tools/edgs_e2e_smoke.py /opt/edgs/tools/edgs_e2e_smoke.py
 
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu22.04 AS runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG EDGS_COMMIT
+
+ENV CUDA_HOME=/usr/local/cuda-12.1 \
+    PATH=/usr/local/cuda-12.1/bin:${PATH} \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:${LD_LIBRARY_PATH} \
+    TORCH_CUDA_ARCH_LIST=8.6 \
+    PYTHONUNBUFFERED=1 \
+    EDGS_COMMIT=${EDGS_COMMIT}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates ffmpeg libglib2.0-0 libgl1 libgomp1 \
+      python3.10 python-is-python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.10/dist-packages \
+  /usr/local/lib/python3.10/dist-packages
+COPY --from=builder /opt/edgs /opt/edgs
+COPY --from=builder /root/.cache/torch /root/.cache/torch
+
 WORKDIR /opt/edgs
+
+# Catch missing runtime libraries without requiring a GPU on the build runner.
+RUN python -c "import torch, romatch; from simple_knn import _C as knn_c; from diff_gaussian_rasterization import _C as raster_c; from source.trainer import EDGSTrainer; print(torch.__version__)"
+
 ENTRYPOINT ["python"]
 CMD ["tools/edgs_gpu_smoke.py"]
